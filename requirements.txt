@@ -1,0 +1,12 @@
+datasets>=2.14.0
+transformers>=4.40.0
+evaluate>=0.4.0
+rouge-score>=0.1.2
+numpy>=1.23
+scipy>=1.10
+torch>=2.1.0
+accelerate>=0.28.0
+tqdm>=4.66
+# Optional for semantic evaluation
+bart-score>=0.0.1
+jsonlines>=4.0.0
