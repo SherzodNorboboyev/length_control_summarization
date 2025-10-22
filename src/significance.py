@@ -11,13 +11,13 @@ def parse_args():
     ap.add_argument("--n_bootstrap", type=int, default=1000)
     return ap.parse_args()
 
-def read_jsonl(path):
+def read_jsonl(path, metric):
     import jsonlines
     vals = []
     with jsonlines.open(path, "r") as reader:
         for obj in reader:
-            if args.metric in obj:
-                vals.append(float(obj[args.metric]))
+            if metric in obj:
+                vals.append(float(obj[metric]))
     return np.array(vals)
 
 def bootstrap_pvalue(diffs, n_bootstrap=1000, seed=42):
@@ -33,8 +33,8 @@ def bootstrap_pvalue(diffs, n_bootstrap=1000, seed=42):
 
 if __name__ == "__main__":
     args = parse_args()
-    a = read_jsonl(args.file_a)
-    b = read_jsonl(args.file_b)
+    a = read_jsonl(args.file_a, args.metric)
+    b = read_jsonl(args.file_b, args.metric)
     assert len(a) == len(b), "Files must have the same number of examples"
     diffs = b - a
     t_stat, p_ttest = stats.ttest_rel(b, a, nan_policy="omit")

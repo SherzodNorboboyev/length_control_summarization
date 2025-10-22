@@ -7,6 +7,9 @@ scipy>=1.10
 torch>=2.1.0
 accelerate>=0.28.0
 tqdm>=4.66
+jsonlines>=4.0.0
 # Optional for semantic evaluation
 bart-score>=0.0.1
-jsonlines>=4.0.0
+# For charts/CSV
+matplotlib>=3.7
+pandas>=2.0

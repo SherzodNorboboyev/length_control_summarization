@@ -1,5 +1,4 @@
 import os
-import json
 import argparse
 from datasets import load_dataset
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments

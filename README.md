@@ -17,13 +17,13 @@ pip install -r requirements.txt
 # huggingface-cli login
 
 # 4) Baseline training
-python -m src.train_baseline       --model_name facebook/bart-large-cnn       --output_dir results/baseline       --epochs 1 --lr 3e-5 --per_device_train_batch_size 4       --max_src_len 1024 --max_tgt_len 128
+python -m src.train_baseline   --model_name facebook/bart-large-cnn   --output_dir results/baseline   --epochs 1 --lr 3e-5 --per_device_train_batch_size 4   --max_src_len 1024 --max_tgt_len 128
 
 # 5) Controlled training (with length tokens)
-python -m src.train_controlled       --model_name facebook/bart-large-cnn       --output_dir results/controlled       --epochs 1 --lr 3e-5 --per_device_train_batch_size 4       --max_src_len 1024 --max_tgt_len 128       --short_thr 60 --medium_thr 100
+python -m src.train_controlled   --model_name facebook/bart-large-cnn   --output_dir results/controlled   --epochs 1 --lr 3e-5 --per_device_train_batch_size 4   --max_src_len 1024 --max_tgt_len 128   --short_thr 60 --medium_thr 100
 
 # 6) Evaluation (ROUGE + length accuracy; BARTScore optional)
-python -m src.evaluate       --model_dir results/controlled       --split validation       --max_src_len 1024 --max_tgt_len 128       --control_token MEDIUM       --short_thr 60 --medium_thr 100       --compute_bartscore false
+python -m src.evaluate   --model_dir results/controlled   --split validation   --max_src_len 1024 --max_tgt_len 128   --control_token MEDIUM   --short_thr 60 --medium_thr 100   --compute_bartscore false   --save_csv true --save_charts true
 ```
 
 ## Length Buckets
@@ -51,7 +51,7 @@ python -m src.evaluate --model_dir results/controlled --compute_bartscore true
 ## Reproducibility
 - Seed is fixed to `42` unless overridden via `--seed`.
 - We log key hyperparameters and ROUGE metrics to stdout and save to `results/**/metrics.json` and `eval_metrics.json`.
-- Per-example metrics are saved to `predictions.jsonl` for significance testing.
+- Per-example metrics are saved to `predictions.jsonl` (and `predictions.csv`) for significance testing.
 
 ## Dataset
 - Hugging Face: `cnn_dailymail` with configuration `3.0.0`.
@@ -60,8 +60,24 @@ python -m src.evaluate --model_dir results/controlled --compute_bartscore true
 ## Significance Tests
 Compare two runs (e.g., baseline vs controlled) with paired tests and bootstrap:
 ```bash
-python -m src.significance       --file_a results/baseline/predictions.jsonl       --file_b results/controlled/predictions.jsonl       --metric rougeL_f1 --n_bootstrap 1000
+python -m src.significance   --file_a results/baseline/predictions.jsonl   --file_b results/controlled/predictions.jsonl   --metric rougeL_f1 --n_bootstrap 1000
 ```
 
-## Citation
-Please cite standard works (BART, PEGASUS, ROUGE, BARTScore, Fan et al. 2018) as included in your LaTeX `.bib`.
+## Charts & CSV Outputs
+The evaluation script saves per-example metrics to JSONL/CSV and generates PNG charts.
+
+Example:
+```bash
+python -m src.evaluate   --model_dir results/controlled   --split validation   --max_src_len 1024 --max_tgt_len 128   --control_token MEDIUM   --short_thr 60 --medium_thr 100   --compute_bartscore false   --save_csv true --save_charts true
+```
+Outputs:
+- `eval_metrics.json`, `predictions.jsonl`, `predictions.csv`, `metrics_summary.csv`
+- Figures in `results/**/figures/`: length histograms, ROUGE distributions, overall ROUGE bar chart, and (optional) BARTScore histogram.
+
+## Poster Examples (Side-by-side SHORT/MEDIUM/LONG)
+```bash
+python -m src.make_poster_examples   --model_dir results/controlled   --split validation   --num_examples 3   --max_src_len 1024 --max_tgt_len 128
+```
+Outputs:
+- `results/controlled/poster_examples.csv`
+- `results/controlled/poster_examples.md`

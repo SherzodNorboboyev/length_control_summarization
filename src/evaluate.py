@@ -1,7 +1,7 @@
 import os
 import json
 import argparse
-from typing import List, Optional
+from typing import List
 import numpy as np
 import torch
 from datasets import load_dataset
@@ -9,6 +9,8 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from evaluate import load as load_metric
 from rouge_score import rouge_scorer
 from tqdm import tqdm
+
+import csv
 
 def parse_args():
     ap = argparse.ArgumentParser()
@@ -23,6 +25,9 @@ def parse_args():
     ap.add_argument("--medium_thr", type=int, default=100)
     ap.add_argument("--compute_bartscore", type=str, default="false", choices=["true","false"])
     ap.add_argument("--output_prefix", type=str, default="")
+    ap.add_argument("--save_csv", type=str, default="true", choices=["true", "false"])
+    ap.add_argument("--save_charts", type=str, default="true", choices=["true", "false"])
+    ap.add_argument("--charts_dir", type=str, default=None, help="optional dir for charts; defaults to <model_dir>/figures")
     return ap.parse_args()
 
 def length_bucket(n_words: int, short_thr: int, medium_thr: int) -> str:
@@ -49,7 +54,7 @@ def main():
     rouge = load_metric("rouge")
     scorer = rouge_scorer.RougeScorer(["rouge1","rouge2","rougeL"], use_stemmer=True)
 
-    preds, refs, rows = [], [], []
+    preds, refs, per_ex = [], [], []
 
     # Build (optional) control prefix
     prefix = ""
@@ -76,16 +81,18 @@ def main():
     rouge_res = {k: round(v.mid.fmeasure * 100, 2) for k, v in rouge_res.items()}
 
     # Per-example metrics
-    per_ex = []
     for p, r in zip(preds, refs):
         sc = scorer.score(r, p)  # (reference, prediction)
-        per_ex.append({
+        row = {
             "rouge1_f1": sc["rouge1"].fmeasure,
             "rouge2_f1": sc["rouge2"].fmeasure,
             "rougeL_f1": sc["rougeL"].fmeasure,
             "pred_len_words": len(p.split()),
             "ref_len_words": len(r.split()),
-        })
+            "prediction": p,
+            "reference": r
+        }
+        per_ex.append(row)
 
     out = {"rouge": rouge_res}
 
@@ -108,7 +115,6 @@ def main():
             scorer_bs = BARTScorer(device=device, checkpoint="facebook/bart-large-cnn")
             bs_scores = scorer_bs.score(preds, refs, batch_size=args.batch_size)
             out["bartscore_mean"] = float(np.mean(bs_scores))
-            # Add per-example BARTScore
             for row, s in zip(per_ex, bs_scores):
                 row["bartscore"] = float(s)
         except Exception as e:
@@ -117,18 +123,106 @@ def main():
     # Save outputs
     out_dir = args.model_dir
     os.makedirs(out_dir, exist_ok=True)
-    prefix = (args.output_prefix + "_") if args.output_prefix else ""
-    with open(os.path.join(out_dir, f"{prefix}eval_metrics.json"), "w") as f:
+    prefix_name = (args.output_prefix + "_") if args.output_prefix else ""
+
+    with open(os.path.join(out_dir, f"{prefix_name}eval_metrics.json"), "w") as f:
         json.dump(out, f, indent=2)
 
-    # Save per-example predictions and metrics
+    # Save per-example predictions and metrics (JSONL + CSV)
     import jsonlines
-    pred_path = os.path.join(out_dir, f"{prefix}predictions.jsonl")
+    pred_path = os.path.join(out_dir, f"{prefix_name}predictions.jsonl")
     with jsonlines.open(pred_path, mode="w") as writer:
-        for p, r, row in zip(preds, refs, per_ex):
-            obj = {"prediction": p, "reference": r}
-            obj.update(row)
-            writer.write(obj)
+        for row in per_ex:
+            writer.write(row)
+
+    if args.save_csv.lower() == "true" and len(per_ex) > 0:
+        csv_path = os.path.join(out_dir, f"{prefix_name}predictions.csv")
+        keys = list(per_ex[0].keys())
+        with open(csv_path, "w", newline="") as fcsv:
+            writer = csv.DictWriter(fcsv, fieldnames=keys)
+            writer.writeheader()
+            for row in per_ex:
+                writer.writerow(row)
+
+        # Also save a compact metrics CSV
+        summary_csv = os.path.join(out_dir, f"{prefix_name}metrics_summary.csv")
+        with open(summary_csv, "w", newline="") as fsum:
+            w = csv.writer(fsum)
+            w.writerow(["metric", "value"])
+            for k, v in out["rouge"].items():
+                w.writerow([k, v])
+            if "length_accuracy" in out:
+                w.writerow(["length_accuracy", out["length_accuracy"]])
+            if "bartscore_mean" in out:
+                w.writerow(["bartscore_mean", out["bartscore_mean"]])
+
+    # Charts
+    if args.save_charts.lower() == "true" and len(per_ex) > 0:
+        charts_dir = args.charts_dir or os.path.join(out_dir, "figures")
+        os.makedirs(charts_dir, exist_ok=True)
+        try:
+            import matplotlib.pyplot as plt
+
+            # Predicted length histogram
+            plt.figure()
+            plt.hist([row["pred_len_words"] for row in per_ex], bins=30)
+            plt.title("Predicted Summary Length (words)")
+            plt.xlabel("Words")
+            plt.ylabel("Count")
+            plt.tight_layout()
+            plt.savefig(os.path.join(charts_dir, f"{prefix_name}pred_len_hist.png"))
+            plt.close()
+
+            # Reference length histogram
+            plt.figure()
+            plt.hist([row["ref_len_words"] for row in per_ex], bins=30)
+            plt.title("Reference Summary Length (words)")
+            plt.xlabel("Words")
+            plt.ylabel("Count")
+            plt.tight_layout()
+            plt.savefig(os.path.join(charts_dir, f"{prefix_name}ref_len_hist.png"))
+            plt.close()
+
+            # ROUGE distributions
+            for key in ["rouge1_f1", "rouge2_f1", "rougeL_f1"]:
+                plt.figure()
+                plt.hist([row[key] for row in per_ex], bins=30)
+                plt.title(f"{key} distribution")
+                plt.xlabel("Score")
+                plt.ylabel("Count")
+                plt.tight_layout()
+                plt.savefig(os.path.join(charts_dir, f"{prefix_name}{key}_hist.png"))
+                plt.close()
+
+            # Overall ROUGE bar chart
+            plt.figure()
+            labels = list(out["rouge"].keys())
+            values = [out["rouge"][k] for k in labels]
+            x = range(len(labels))
+            plt.bar(x, values)
+            plt.xticks(ticks=x, labels=labels)
+            plt.ylabel("F1 (%)")
+            plt.title("Overall ROUGE")
+            plt.tight_layout()
+            plt.savefig(os.path.join(charts_dir, f"{prefix_name}rouge_overall_bar.png"))
+            plt.close()
+
+            # BARTScore distribution if available
+            if any("bartscore" in row for row in per_ex):
+                vals = [row["bartscore"] for row in per_ex if "bartscore" in row]
+                if len(vals) > 0:
+                    plt.figure()
+                    plt.hist(vals, bins=30)
+                    plt.title("BARTScore distribution")
+                    plt.xlabel("Score")
+                    plt.ylabel("Count")
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(charts_dir, f"{prefix_name}bartscore_hist.png"))
+                    plt.close()
+
+        except Exception as e:
+            with open(os.path.join(out_dir, f"{prefix_name}chart_error.log"), "w") as ferr:
+                ferr.write(str(e))
 
     print(json.dumps(out, indent=2))
 
