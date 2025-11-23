@@ -9,8 +9,8 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from evaluate import load as load_metric
 from rouge_score import rouge_scorer
 from tqdm import tqdm
-
 import csv
+import jsonlines
 
 def parse_args():
     ap = argparse.ArgumentParser()
@@ -23,11 +23,14 @@ def parse_args():
     ap.add_argument("--control_token", type=str, default=None, choices=[None, "SHORT", "MEDIUM", "LONG"])
     ap.add_argument("--short_thr", type=int, default=60)
     ap.add_argument("--medium_thr", type=int, default=100)
-    ap.add_argument("--compute_bartscore", type=str, default="false", choices=["true","false"])
+    ap.add_argument("--compute_local_bartscore", type=str, default="false", choices=["true","false"], help="Use built-in local BARTScore implementation")
+    ap.add_argument("--bartscore_condition", type=str, default="source", choices=["source","reference"], help="Condition on source article or reference when computing local BARTScore")
     ap.add_argument("--output_prefix", type=str, default="")
     ap.add_argument("--save_csv", type=str, default="true", choices=["true", "false"])
     ap.add_argument("--save_charts", type=str, default="true", choices=["true", "false"])
     ap.add_argument("--charts_dir", type=str, default=None, help="optional dir for charts; defaults to <model_dir>/figures")
+    ap.add_argument("--output_dir", type=str, default=None, help="Where to write eval artifacts. Defaults to results/eval_<model_id> if model_dir is a hub ID.")
+
     return ap.parse_args()
 
 def length_bucket(n_words: int, short_thr: int, medium_thr: int) -> str:
@@ -68,17 +71,25 @@ def main():
 
     # Generate predictions
     for batch in tqdm(list(batch_iter(dataset, args.batch_size))):
-        articles = [prefix + ex["article"] for ex in batch]
+        articles = [prefix + ex for ex in batch["article"]]
         inputs = tokenizer(articles, max_length=args.max_src_len, truncation=True, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
             gen = model.generate(**inputs, max_length=args.max_tgt_len)
         decoded = tokenizer.batch_decode(gen, skip_special_tokens=True)
         preds.extend(decoded)
-        refs.extend([ex["highlights"] for ex in batch])
+        refs.extend([ex for ex in batch["highlights"]])
 
     # Aggregate ROUGE
     rouge_res = rouge.compute(predictions=preds, references=refs, use_stemmer=True)
-    rouge_res = {k: round(v.mid.fmeasure * 100, 2) for k, v in rouge_res.items()}
+    # rouge_res = {k: round(v.mid.fmeasure * 100, 2) for k, v in rouge_res.items()}
+    norm_rouge = {}
+    for k, v in rouge_res.items():
+        try:
+            val = float(v.mid.fmeasure)  # old style (Score object)
+        except AttributeError:
+            val = float(v)               # new style (float)
+        norm_rouge[k] = round(val * 100, 2)
+    rouge_res = norm_rouge
 
     # Per-example metrics
     for p, r in zip(preds, refs):
@@ -108,28 +119,38 @@ def main():
             row["desired_bucket"] = desired
         out["length_accuracy"] = round(hits / len(per_ex), 4)
 
-    # Optional BARTScore
-    if args.compute_bartscore.lower() == "true":
-        try:
-            from bart_score import BARTScorer
-            scorer_bs = BARTScorer(device=device, checkpoint="facebook/bart-large-cnn")
-            bs_scores = scorer_bs.score(preds, refs, batch_size=args.batch_size)
-            out["bartscore_mean"] = float(np.mean(bs_scores))
-            for row, s in zip(per_ex, bs_scores):
-                row["bartscore"] = float(s)
-        except Exception as e:
-            out["bartscore_error"] = str(e)
+    # Optional Local BARTScore (no external dependency)
+    if args.compute_local_bartscore.lower() == "true":
+        from src.local_bartscore import LocalBARTScorer
+        if args.bartscore_condition == "source":
+            cond_sources = [ex["article"] for ex in dataset]
+        else:
+            cond_sources = refs
+        lbs = LocalBARTScorer(device=device)
+        lbs_scores = lbs.score(cond_sources, preds, batch_size=args.batch_size, max_src_len=args.max_src_len, max_tgt_len=args.max_tgt_len)
+        out["local_bartscore_mean"] = float(np.mean(lbs_scores))
+        for row, s in zip(per_ex, lbs_scores):
+            row["local_bartscore"] = float(s)
 
     # Save outputs
-    out_dir = args.model_dir
+    # Decide where to write outputs
+    if args.output_dir is not None:
+        out_dir = args.output_dir
+    else:
+        if os.path.isdir(args.model_dir):
+            # Local fine-tuned model directory -> write there
+            out_dir = args.model_dir
+        else:
+            # Hub model ID -> write to a safe local path
+            safe = args.model_dir.replace("/", "__")
+            out_dir = os.path.join("results", f"eval_{safe}")
     os.makedirs(out_dir, exist_ok=True)
+
     prefix_name = (args.output_prefix + "_") if args.output_prefix else ""
 
     with open(os.path.join(out_dir, f"{prefix_name}eval_metrics.json"), "w") as f:
         json.dump(out, f, indent=2)
 
-    # Save per-example predictions and metrics (JSONL + CSV)
-    import jsonlines
     pred_path = os.path.join(out_dir, f"{prefix_name}predictions.jsonl")
     with jsonlines.open(pred_path, mode="w") as writer:
         for row in per_ex:
@@ -144,7 +165,6 @@ def main():
             for row in per_ex:
                 writer.writerow(row)
 
-        # Also save a compact metrics CSV
         summary_csv = os.path.join(out_dir, f"{prefix_name}metrics_summary.csv")
         with open(summary_csv, "w", newline="") as fsum:
             w = csv.writer(fsum)
@@ -153,8 +173,8 @@ def main():
                 w.writerow([k, v])
             if "length_accuracy" in out:
                 w.writerow(["length_accuracy", out["length_accuracy"]])
-            if "bartscore_mean" in out:
-                w.writerow(["bartscore_mean", out["bartscore_mean"]])
+            if "local_bartscore_mean" in out:
+                w.writerow(["local_bartscore_mean", out["local_bartscore_mean"]])
 
     # Charts
     if args.save_charts.lower() == "true" and len(per_ex) > 0:
@@ -207,17 +227,17 @@ def main():
             plt.savefig(os.path.join(charts_dir, f"{prefix_name}rouge_overall_bar.png"))
             plt.close()
 
-            # BARTScore distribution if available
-            if any("bartscore" in row for row in per_ex):
-                vals = [row["bartscore"] for row in per_ex if "bartscore" in row]
+            # Local BARTScore distribution if available
+            if any("local_bartscore" in row for row in per_ex):
+                vals = [row["local_bartscore"] for row in per_ex if "local_bartscore" in row]
                 if len(vals) > 0:
                     plt.figure()
                     plt.hist(vals, bins=30)
-                    plt.title("BARTScore distribution")
-                    plt.xlabel("Score")
+                    plt.title("Local BARTScore (avg log-prob) distribution")
+                    plt.xlabel("Score (nats per token)")
                     plt.ylabel("Count")
                     plt.tight_layout()
-                    plt.savefig(os.path.join(charts_dir, f"{prefix_name}bartscore_hist.png"))
+                    plt.savefig(os.path.join(charts_dir, f"{prefix_name}local_bartscore_hist.png"))
                     plt.close()
 
         except Exception as e:

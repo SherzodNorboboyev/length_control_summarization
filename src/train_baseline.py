@@ -1,7 +1,7 @@
 import os
 import argparse
 from datasets import load_dataset
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Trainer
 from evaluate import load as load_metric
 from src.utils import set_seed, load_json, save_json
 from src.data_preprocessing import build_preprocess_fn
@@ -21,8 +21,8 @@ def parse_args():
     ap.add_argument("--warmup_ratio", type=float, default=0.06)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=1)
     ap.add_argument("--logging_steps", type=int, default=50)
-    ap.add_argument("--eval_strategy", type=str, default="epoch")
-    ap.add_argument("--save_strategy", type=str, default="epoch")
+    ap.add_argument("--eval_steps", type=int, default=1000)
+    ap.add_argument("--save_steps", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=42)
     return ap.parse_args()
 
@@ -47,19 +47,28 @@ def main():
     rouge = load_metric("rouge")
 
     def compute_metrics(eval_pred):
-        preds, labels = eval_pred
-        # Seq2SeqTrainer with predict_with_generate=True returns token ids
-        pred_str = tokenizer.batch_decode(preds, skip_special_tokens=True)
-        labels[labels == -100] = tokenizer.pad_token_id
+        predictions, labels = eval_pred
+        if isinstance(predictions, tuple):
+            predictions = predictions[0]
+        pred_str = tokenizer.batch_decode(predictions, skip_special_tokens=True)
+        labels = [[(tok if tok != -100 else tokenizer.pad_token_id) for tok in label] for label in labels]
         label_str = tokenizer.batch_decode(labels, skip_special_tokens=True)
         result = rouge.compute(predictions=pred_str, references=label_str, use_stemmer=True)
-        result = {k: round(v.mid.fmeasure * 100, 2) for k, v in result.items()}
-        return result
+        # return {k: round(v.mid.fmeasure * 100, 2) for k, v in result.items()}
+        norm = {}
+        for k, v in result.items():
+            try:
+                val = float(v.mid.fmeasure)
+            except AttributeError:
+                val = float(v)
+            norm[k] = round(val * 100, 2)
+        return norm
 
-    training_args = TrainingArguments(
+    training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
-        evaluation_strategy=args.eval_strategy,
-        save_strategy=args.save_strategy,
+        do_eval=True,
+        eval_steps=args.eval_steps,
+        save_steps=args.save_steps,
         learning_rate=args.lr,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
@@ -70,7 +79,7 @@ def main():
         logging_steps=args.logging_steps,
         predict_with_generate=True,
         generation_max_length=args.max_tgt_len,
-        report_to=["none"],
+        report_to="none",
         seed=args.seed,
     )
 
@@ -88,7 +97,6 @@ def main():
     metrics = trainer.evaluate()
     save_json(metrics, os.path.join(args.output_dir, "metrics.json"))
 
-    # Save model + tokenizer
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 

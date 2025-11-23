@@ -13,7 +13,7 @@
   "warmup_ratio": 0.06,
   "gradient_accumulation_steps": 1,
   "logging_steps": 50,
-  "eval_strategy": "epoch",
-  "save_strategy": "epoch",
+  "eval_steps": 1000,
+  "save_steps": 1000,
   "seed": 42
 }

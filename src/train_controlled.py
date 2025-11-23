@@ -61,12 +61,20 @@ def main():
         labels[labels == -100] = tokenizer.pad_token_id
         label_str = tokenizer.batch_decode(labels, skip_special_tokens=True)
         result = rouge.compute(predictions=pred_str, references=label_str, use_stemmer=True)
-        result = {k: round(v.mid.fmeasure * 100, 2) for k, v in result.items()}
-        return result
+        # result = {k: round(v.mid.fmeasure * 100, 2) for k, v in result.items()}
+        # return result
+        norm = {}
+        for k, v in result.items():
+            try:
+                val = float(v.mid.fmeasure)
+            except AttributeError:
+                val = float(v)
+            norm[k] = round(val * 100, 2)
+        return norm
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        evaluation_strategy=args.eval_strategy,
+        eval_strategy=args.eval_strategy,
         save_strategy=args.save_strategy,
         learning_rate=args.lr,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -76,7 +84,6 @@ def main():
         warmup_ratio=args.warmup_ratio,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         logging_steps=args.logging_steps,
-        predict_with_generate=True,
         generation_max_length=args.max_tgt_len,
         report_to=["none"],
         seed=args.seed,
@@ -90,6 +97,7 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
+        predict_with_generate=True,
     )
 
     trainer.train()

@@ -12,12 +12,11 @@ def build_preprocess_fn(tokenizer, max_src_len: int, max_tgt_len: int):
             max_length=max_src_len,
             truncation=True,
         )
-        with tokenizer.as_target_tokenizer():
-            labels = tokenizer(
-                batch["highlights"],
-                max_length=max_tgt_len,
-                truncation=True,
-            )
+        labels = tokenizer(
+            text_target=batch["highlights"],
+            max_length=max_tgt_len,
+            truncation=True,
+        )
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
     return _fn
@@ -39,12 +38,11 @@ def build_preprocess_with_control(tokenizer, max_src_len: int, max_tgt_len: int,
             max_length=max_src_len,
             truncation=True,
         )
-        with tokenizer.as_target_tokenizer():
-            labels = tokenizer(
-                batch["highlights"],
-                max_length=max_tgt_len,
-                truncation=True,
-            )
+        labels = tokenizer(
+            text_target=batch["highlights"],
+            max_length=max_tgt_len,
+            truncation=True,
+        )
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
 
