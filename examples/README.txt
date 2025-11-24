@@ -1,0 +1,1 @@
+This folder can store example inputs/outputs of the project.
