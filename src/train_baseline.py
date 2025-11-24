@@ -41,7 +41,11 @@ def main():
     preprocess_fn = build_preprocess_fn(tokenizer, args.max_src_len, args.max_tgt_len)
     tokenized = dataset.map(preprocess_fn, batched=True, remove_columns=dataset["train"].column_names)
 
-    model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, attn_implementation="eager")
+    model.config.use_cache = False     # lowers memory during training
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
+
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
     rouge = load_metric("rouge")
@@ -77,6 +81,7 @@ def main():
         warmup_ratio=args.warmup_ratio,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         logging_steps=args.logging_steps,
+    gradient_checkpointing=True,
         predict_with_generate=True,
         generation_max_length=args.max_tgt_len,
         report_to="none",

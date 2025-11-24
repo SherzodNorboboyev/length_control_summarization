@@ -77,8 +77,8 @@ python -m src.train_baseline --config config/baseline.json
 # Length-controlled training
 python -m src.train_controlled --config config/controlled.json
 
-# Evaluation (ROUGE + Length Accuracy + Local BARTScore + charts/CSV)
-python -m src.evaluate   --model_dir results/controlled   --split validation   --max_src_len 1024 --max_tgt_len 128   --control_token MEDIUM   --short_thr 60 --medium_thr 100   --compute_local_bartscore true   --bartscore_condition source   --save_csv true --save_charts true
+# Evaluation (ROUGE + Length Accuracy + BARTScore + charts/CSV)
+python -m src.evaluate   --model_dir results/controlled   --split validation   --max_src_len 1024 --max_tgt_len 128   --control_token MEDIUM   --short_thr 60 --medium_thr 100   --compute_bartscore true   --bartscore_condition source   --save_csv true --save_charts true
 ```
 
 ## Significance Tests
@@ -94,7 +94,7 @@ export PYTORCH_MPS_DISABLE=1
 python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 500 \
   --max_src_len 384 --max_tgt_len 64 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true
 ```
 
@@ -104,7 +104,7 @@ python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 300 \
   --max_src_len 384 --max_tgt_len 128 \
   --control_token MEDIUM --short_thr 60 --medium_thr 100 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true --output_prefix medium_len128
 ```
 
@@ -114,7 +114,7 @@ python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 500 \
   --max_src_len 384 --max_tgt_len 64 \
   --control_token LONG --short_thr 20 --medium_thr 40 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true --output_prefix long_len64
 ```
 
@@ -126,7 +126,7 @@ python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 500 \
   --max_src_len 384 --max_tgt_len 32 \
   --control_token SHORT --short_thr 20 --medium_thr 40 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true --output_prefix short_len32
 ```
 
@@ -136,7 +136,7 @@ python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 500 \
   --max_src_len 384 --max_tgt_len 64 \
   --control_token MEDIUM --short_thr 20 --medium_thr 40 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true --output_prefix medium_len64
 ```
 
@@ -146,7 +146,7 @@ python -m src.evaluate --model_dir facebook/bart-base \
   --split validation --num_examples 500 \
   --max_src_len 384 --max_tgt_len 96 \
   --control_token LONG --short_thr 20 --medium_thr 40 \
-  --compute_local_bartscore true --bartscore_condition source \
+  --compute_bartscore true --bartscore_condition source \
   --save_csv true --save_charts true --output_prefix long_len96
 ```
 
@@ -155,13 +155,13 @@ python -m src.evaluate --model_dir facebook/bart-base \
 
 ## 📊 Evaluation Metrics
 - **ROUGE-1/2/L** — lexical overlap quality
-- **Local BARTScore** — semantic similarity (source-conditioned likelihood)
+- **BARTScore** — semantic similarity (source-conditioned likelihood)
 - **Length Accuracy (LAcc)** — how often generated summaries fall within requested buckets
 
 ---
 
 ## 🧩 Example Output
-| Target | ROUGE-L | Length Accuracy | Local BARTScore |
+| Target | ROUGE-L | Length Accuracy | BARTScore |
 |---------|----------|----------------|-----------------|
 | `<SHORT>` | 23.35 | 0.51 | -2.50 |
 | `<MEDIUM>` | 30.33 | 0.09 | -1.33 |
